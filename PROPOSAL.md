@@ -14,3 +14,6 @@ Cryptocurrencies are characterized by high and unpredictable price fluctuations.
     - **Advanced**: LSTM (Long Short-Term Memory) network.
 - **Validation**: Walk-forward validation with rolling windows to respect the temporal order of financial series.
 - **Evaluation**: Standard metrics including Root Mean Square Error (RMSE) and Mean Absolute Error (MAE).
+
+## Expected Outcomes
+The goal is to provide a comparative analysis of model performances and to build a clean, modular, and reproducible Python codebase for financial time-series forecasting.
