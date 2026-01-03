@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 
 from src.data_loader import download_crypto_prices, prepare_dataset
 from src.evaluation import compute_metrics
+from src.models import garch_forecast_sigma_path
 
 
 def ensure_results_dir() -> None:
@@ -57,13 +58,23 @@ def run_for_ticker(ticker: str, start: str, end: str, vol_window: int, horizon: 
     for fold_id, (train_end, test_start, test_end) in enumerate(splits, start=1):
         y_true_block, y_pred_block = naive_predict_on_block(df, test_start, test_end)
 
-        m = compute_metrics(y_true_block, y_pred_block)
-        fold_metrics.append({"ticker": ticker, "fold": fold_id, "train_end_index": train_end, "test_start_index": test_start, "test_end_index": test_end, **m,})
+        past_returns = df["log_return"].iloc[:test_start]  
+        horizon_block = test_end - test_start
+        garch_path = garch_forecast_sigma_path(past_returns, horizon_block)
+        y_pred_garch_block = pd.Series(garch_path, index=y_true_block.index)
+
+        m_naive = compute_metrics(y_true_block, y_pred_block)
+        valid = y_pred_garch_block.notna()
+        m_garch = compute_metrics(y_true_block[valid], y_pred_garch_block[valid])
+
+        fold_metrics.append({"ticker": ticker, "fold": fold_id, "train_end_index": train_end, "test_start_index": test_start, "test_end_index": test_end, "rmse_naive": m_naive["rmse"], "mae_naive": m_naive["mae"], "rmse_garch": m_garch["rmse"], "mae_garch": m_garch["mae"],})
+
 
         block = df.iloc[test_start:test_end].copy()
         block = block.reset_index()[["Date", "target"]]
         block = block.rename(columns={"target": "y_true"})
         block["y_pred_naive"] = y_pred_block.values
+        block["y_pred_garch"] = y_pred_garch_block.values
         block["ticker"] = ticker
         block["fold"] = fold_id
         all_pred_rows.append(block)
@@ -71,8 +82,11 @@ def run_for_ticker(ticker: str, start: str, end: str, vol_window: int, horizon: 
     pred_df = pd.concat(all_pred_rows, ignore_index=True)
     fold_metrics_df = pd.DataFrame(fold_metrics)
 
-    overall = compute_metrics(pred_df["y_true"], pred_df["y_pred_naive"])
-    overall_df = pd.DataFrame([{"ticker": ticker, **overall}])
+    overall_naive = compute_metrics(pred_df["y_true"], pred_df["y_pred_naive"])
+    valid_all = pred_df["y_pred_garch"].notna()
+    overall_garch = compute_metrics(pred_df.loc[valid_all, "y_true"], pred_df.loc[valid_all, "y_pred_garch"])
+
+    overall_df = pd.DataFrame([{"ticker": ticker, "rmse_naive": overall_naive["rmse"], "mae_naive": overall_naive["mae"], "rmse_garch": overall_garch["rmse"], "mae_garch": overall_garch["mae"],}])
 
     return pred_df, fold_metrics_df, overall_df
 
