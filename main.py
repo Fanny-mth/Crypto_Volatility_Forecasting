@@ -91,19 +91,29 @@ def run_for_ticker(ticker: str, start: str, end: str, vol_window: int, horizon: 
     return pred_df, fold_metrics_df, overall_df
 
 
-def plot_predictions(pred_df: pd.DataFrame, out_path: str) -> None:
-    plt.figure()
-    for ticker, g in pred_df.groupby("ticker"):
-        plt.plot(g["Date"], g["y_true"], label=f"{ticker} true")
-        plt.plot(g["Date"], g["y_pred_naive"], linestyle="--", label=f"{ticker} naive")
+def plot_predictions(pred_df: pd.DataFrame, out_dir: str) -> None:
+    os.makedirs(out_dir, exist_ok=True)
 
-    plt.title("Realized Volatility: True vs Naive Baseline")
-    plt.xlabel("Date")
-    plt.ylabel("Volatility")
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(out_path, dpi=150)
-    plt.close()
+    pred_df = pred_df.copy()
+    pred_df["Date"] = pd.to_datetime(pred_df["Date"])
+
+    for ticker, g in pred_df.groupby("ticker"):
+        g = g.sort_values("Date")
+
+        plt.figure()
+        plt.plot(g["Date"], g["y_true"], label="True")
+        plt.plot(g["Date"], g["y_pred_naive"], linestyle="--", label="Naive")
+
+        if "y_pred_garch" in g.columns:
+            plt.plot(g["Date"], g["y_pred_garch"], linestyle=":", label="GARCH")
+
+        plt.title(f"Realized Volatility Forecast - {ticker}")
+        plt.xlabel("Date")
+        plt.ylabel("Volatility")
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig(os.path.join(out_dir, f"plot_{ticker}.png"), dpi=150)
+        plt.close()
 
 
 def main() -> None:
@@ -133,6 +143,7 @@ def main() -> None:
     fold_metrics_df.to_csv("results/metrics_walkforward_folds.csv", index=False)
     overall_metrics_df.to_csv("results/metrics_walkforward_overall.csv", index=False)
 
+    plot_predictions(pred_df, "results/plots")
     print("Done(walk-forward)")
     print(overall_metrics_df)
 
