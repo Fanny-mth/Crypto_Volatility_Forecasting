@@ -78,6 +78,31 @@ def run_for_ticker(ticker: str, start: str, end: str, vol_window: int, horizon: 
         valid = y_pred_garch_block.notna()
         m_garch = compute_metrics(y_true_block[valid], y_pred_garch_block[valid])
 
+        # LSTM (prep)
+        cfg = LSTMConfig(lookback=30)
+
+        train_df = df.iloc[:test_start].copy()
+        full_df = df.iloc[:test_end].copy()
+
+        X_train_raw = train_df[feature_cols].values
+        y_train_raw = train_df["target"].values
+
+        X_full_raw = full_df[feature_cols].values
+        y_full_raw = full_df["target"].values
+
+        scaler = StandardScaler()
+        X_train = scaler.fit_transform(X_train_raw)
+        X_full = scaler.transform(X_full_raw)
+
+        X_train_seq, y_train_seq = make_sequences(X_train, y_train_raw, cfg.lookback)
+        X_full_seq, _ = make_sequences(X_full, y_full_raw, cfg.lookback)
+
+        seq_offset = cfg.lookback
+        X_test_seq = X_full_seq[test_start - seq_offset : test_end - seq_offset]
+
+        if len(X_train_seq) == 0 or len(X_test_seq) == 0:
+            raise ValueError("LSTM sequences empty. Try smaller lookback or more data.")
+
         fold_metrics.append({"ticker": ticker, "fold": fold_id, "train_end_index": train_end, "test_start_index": test_start, "test_end_index": test_end, "rmse_naive": m_naive["rmse"], "mae_naive": m_naive["mae"], "rmse_garch": m_garch["rmse"], "mae_garch": m_garch["mae"],})
 
         block = df.iloc[test_start:test_end][["Date", "target"]].copy()
