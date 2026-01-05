@@ -7,7 +7,8 @@ import matplotlib.pyplot as plt
 from src.data_loader import download_crypto_prices, prepare_dataset
 from src.evaluation import compute_metrics
 from src.models import garch_forecast_sigma_path
-
+from sklearn.preprocessing import StandardScaler
+from src.models import LSTMConfig, make_sequences, train_lstm_predict
 
 def ensure_results_dir() -> None:
     os.makedirs("results", exist_ok=True)
@@ -41,6 +42,14 @@ def naive_predict_on_block(df: pd.DataFrame, test_start: int, test_end: int) -> 
 def run_for_ticker(ticker: str, start: str, end: str, vol_window: int, horizon: int,):
     prices = download_crypto_prices(ticker, start=start, end=end)
     df = prepare_dataset(prices, vol_window=vol_window, horizon=horizon)
+
+    df = df.copy()
+    df = df.dropna().reset_index(drop=True)  
+
+    feature_cols = ["rv_7", "log_return"]
+    for c in feature_cols:
+        if c not in df.columns:
+            raise ValueError(f"Missing feature column: {c}. Available columns: {df.columns.tolist()}")
 
     n = len(df)
 
