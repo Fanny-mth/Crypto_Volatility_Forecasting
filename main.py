@@ -4,18 +4,17 @@ import os
 import pandas as pd
 import matplotlib.pyplot as plt
 
+from sklearn.preprocessing import StandardScaler  
+
 from src.data_loader import download_crypto_prices, prepare_dataset
 from src.evaluation import compute_metrics
 from src.models import garch_forecast_sigma_path
-from sklearn.preprocessing import StandardScaler
+
 from src.models import LSTMConfig, make_sequences, train_lstm_predict
 
+
 def ensure_results_dir() -> None:
-    os.makedirs("results", exist_ok=True)
-
-
-def naive_baseline_predict(df: pd.DataFrame) -> pd.Series:
-    return df["target"].shift(1)
+    os.makedirs("results/plots", exist_ok=True)
 
 
 def make_walk_forward_splits(n: int, initial_train_size: int, test_size: int, step_size: int):
@@ -33,18 +32,20 @@ def make_walk_forward_splits(n: int, initial_train_size: int, test_size: int, st
     return splits
 
 
-def naive_predict_on_block(df: pd.DataFrame, test_start: int, test_end: int) -> pd.Series:
+def naive_predict_on_block(df: pd.DataFrame, test_start: int, test_end: int):
     y_true_block = df["target"].iloc[test_start:test_end]
     y_pred_block = df["target"].shift(1).iloc[test_start:test_end]
     return y_true_block, y_pred_block
 
 
-def run_for_ticker(ticker: str, start: str, end: str, vol_window: int, horizon: int,):
+def run_for_ticker(ticker: str, start: str, end: str, vol_window: int, horizon: int):
     prices = download_crypto_prices(ticker, start=start, end=end)
     df = prepare_dataset(prices, vol_window=vol_window, horizon=horizon)
 
-    df = df.copy()
-    df = df.dropna().reset_index(drop=True)  
+    if "Date" not in df.columns:
+        df = df.reset_index().rename(columns={"index": "Date"})
+
+    df = df.dropna().reset_index(drop=True)
 
     feature_cols = ["rv_7", "log_return"]
     for c in feature_cols:
@@ -53,34 +54,33 @@ def run_for_ticker(ticker: str, start: str, end: str, vol_window: int, horizon: 
 
     n = len(df)
 
-    initial_train_size = int(0.6 * n)   
-    test_size = 30                      
-    step_size = 30                      
+    initial_train_size = int(0.6 * n)
+    test_size = 30
+    step_size = 30
 
     splits = make_walk_forward_splits(n, initial_train_size, test_size, step_size)
     if len(splits) == 0:
-        raise ValueError("Not enough data for walk-forward splits. Reduce test_size/step_size or use more data.")
+        raise ValueError("Not enough data for walk-forward splits. Use more data or reduce test_size/step_size.")
 
     all_pred_rows = []
     fold_metrics = []
 
     for fold_id, (train_end, test_start, test_end) in enumerate(splits, start=1):
+        # NAIVE
         y_true_block, y_pred_block = naive_predict_on_block(df, test_start, test_end)
+        m_naive = compute_metrics(y_true_block, y_pred_block)
 
-        past_returns = df["log_return"].iloc[:test_start]  
+        # GARCH
+        past_returns = df["log_return"].iloc[:test_start]
         horizon_block = test_end - test_start
         garch_path = garch_forecast_sigma_path(past_returns, horizon_block)
         y_pred_garch_block = pd.Series(garch_path, index=y_true_block.index)
-
-        m_naive = compute_metrics(y_true_block, y_pred_block)
         valid = y_pred_garch_block.notna()
         m_garch = compute_metrics(y_true_block[valid], y_pred_garch_block[valid])
 
         fold_metrics.append({"ticker": ticker, "fold": fold_id, "train_end_index": train_end, "test_start_index": test_start, "test_end_index": test_end, "rmse_naive": m_naive["rmse"], "mae_naive": m_naive["mae"], "rmse_garch": m_garch["rmse"], "mae_garch": m_garch["mae"],})
 
-
-        block = df.iloc[test_start:test_end].copy()
-        block = block.reset_index()[["Date", "target"]]
+        block = df.iloc[test_start:test_end][["Date", "target"]].copy()
         block = block.rename(columns={"target": "y_true"})
         block["y_pred_naive"] = y_pred_block.values
         block["y_pred_garch"] = y_pred_garch_block.values
@@ -102,20 +102,16 @@ def run_for_ticker(ticker: str, start: str, end: str, vol_window: int, horizon: 
 
 def plot_predictions(pred_df: pd.DataFrame, out_dir: str) -> None:
     os.makedirs(out_dir, exist_ok=True)
-
     pred_df = pred_df.copy()
     pred_df["Date"] = pd.to_datetime(pred_df["Date"])
 
     for ticker, g in pred_df.groupby("ticker"):
         g = g.sort_values("Date")
 
-        plt.figure()
+        plt.figure(figsize=(10, 4))
         plt.plot(g["Date"], g["y_true"], label="True")
         plt.plot(g["Date"], g["y_pred_naive"], linestyle="--", label="Naive")
-
-        if "y_pred_garch" in g.columns:
-            plt.plot(g["Date"], g["y_pred_garch"], linestyle=":", label="GARCH")
-
+        plt.plot(g["Date"], g["y_pred_garch"], linestyle=":", label="GARCH")
         plt.title(f"Realized Volatility Forecast - {ticker}")
         plt.xlabel("Date")
         plt.ylabel("Volatility")
@@ -153,9 +149,11 @@ def main() -> None:
     overall_metrics_df.to_csv("results/metrics_walkforward_overall.csv", index=False)
 
     plot_predictions(pred_df, "results/plots")
-    print("Done(walk-forward)")
+
+    print("Done")
     print(overall_metrics_df)
 
 
 if __name__ == "__main__":
     main()
+
