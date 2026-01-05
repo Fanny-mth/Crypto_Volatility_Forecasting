@@ -100,6 +100,9 @@ def run_for_ticker(ticker: str, start: str, end: str, vol_window: int, horizon: 
         seq_offset = cfg.lookback
         X_test_seq = X_full_seq[test_start - seq_offset : test_end - seq_offset]
 
+        lstm_preds = train_lstm_predict(X_train_seq, y_train_seq, X_test_seq, cfg)
+        y_pred_lstm_block = pd.Series(lstm_preds, index=y_true_block.index)
+
         if len(X_train_seq) == 0 or len(X_test_seq) == 0:
             raise ValueError("LSTM sequences empty. Try smaller lookback or more data.")
 
@@ -109,6 +112,7 @@ def run_for_ticker(ticker: str, start: str, end: str, vol_window: int, horizon: 
         block = block.rename(columns={"target": "y_true"})
         block["y_pred_naive"] = y_pred_block.values
         block["y_pred_garch"] = y_pred_garch_block.values
+        block["y_pred_lstm"] = y_pred_lstm_block.values
         block["ticker"] = ticker
         block["fold"] = fold_id
         all_pred_rows.append(block)
