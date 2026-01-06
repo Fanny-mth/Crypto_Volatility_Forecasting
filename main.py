@@ -4,12 +4,11 @@ import os
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from sklearn.preprocessing import StandardScaler  
+from sklearn.preprocessing import StandardScaler
 
 from src.data_loader import download_crypto_prices, prepare_dataset
 from src.evaluation import compute_metrics
 from src.models import garch_forecast_sigma_path
-
 from src.models import LSTMConfig, make_sequences, train_lstm_predict
 
 
@@ -75,10 +74,11 @@ def run_for_ticker(ticker: str, start: str, end: str, vol_window: int, horizon: 
         horizon_block = test_end - test_start
         garch_path = garch_forecast_sigma_path(past_returns, horizon_block)
         y_pred_garch_block = pd.Series(garch_path, index=y_true_block.index)
+
         valid = y_pred_garch_block.notna()
         m_garch = compute_metrics(y_true_block[valid], y_pred_garch_block[valid])
 
-        # LSTM (prep)
+        # LSTM 
         cfg = LSTMConfig(lookback=30)
 
         train_df = df.iloc[:test_start].copy()
@@ -98,16 +98,20 @@ def run_for_ticker(ticker: str, start: str, end: str, vol_window: int, horizon: 
         X_full_seq, _ = make_sequences(X_full, y_full_raw, cfg.lookback)
 
         seq_offset = cfg.lookback
-        X_test_seq = X_full_seq[test_start - seq_offset : test_end - seq_offset]
-
-        lstm_preds = train_lstm_predict(X_train_seq, y_train_seq, X_test_seq, cfg)
-        y_pred_lstm_block = pd.Series(lstm_preds, index=y_true_block.index)
+        X_test_seq = X_full_seq[test_start - seq_offset: test_end - seq_offset]
 
         if len(X_train_seq) == 0 or len(X_test_seq) == 0:
             raise ValueError("LSTM sequences empty. Try smaller lookback or more data.")
 
-        fold_metrics.append({"ticker": ticker, "fold": fold_id, "train_end_index": train_end, "test_start_index": test_start, "test_end_index": test_end, "rmse_naive": m_naive["rmse"], "mae_naive": m_naive["mae"], "rmse_garch": m_garch["rmse"], "mae_garch": m_garch["mae"],})
+        lstm_preds = train_lstm_predict(X_train_seq, y_train_seq, X_test_seq, cfg)
+        y_pred_lstm_block = pd.Series(lstm_preds, index=y_true_block.index)
 
+        m_lstm = compute_metrics(y_true_block, y_pred_lstm_block)
+
+        # Save fold metrics 
+        fold_metrics.append({"ticker": ticker, "fold": fold_id, "train_end_index": train_end, "test_start_index": test_start, "test_end_index": test_end, "rmse_naive": m_naive["rmse"], "mae_naive": m_naive["mae"], "rmse_garch": m_garch["rmse"], "mae_garch": m_garch["mae"], "rmse_lstm": m_lstm["rmse"], "mae_lstm": m_lstm["mae"],})
+
+        # Save predictions 
         block = df.iloc[test_start:test_end][["Date", "target"]].copy()
         block = block.rename(columns={"target": "y_true"})
         block["y_pred_naive"] = y_pred_block.values
@@ -120,11 +124,15 @@ def run_for_ticker(ticker: str, start: str, end: str, vol_window: int, horizon: 
     pred_df = pd.concat(all_pred_rows, ignore_index=True)
     fold_metrics_df = pd.DataFrame(fold_metrics)
 
+    # Overall metrics 
     overall_naive = compute_metrics(pred_df["y_true"], pred_df["y_pred_naive"])
-    valid_all = pred_df["y_pred_garch"].notna()
-    overall_garch = compute_metrics(pred_df.loc[valid_all, "y_true"], pred_df.loc[valid_all, "y_pred_garch"])
 
-    overall_df = pd.DataFrame([{"ticker": ticker, "rmse_naive": overall_naive["rmse"], "mae_naive": overall_naive["mae"], "rmse_garch": overall_garch["rmse"], "mae_garch": overall_garch["mae"],}])
+    valid_all = pred_df["y_pred_garch"].notna()
+    overall_garch = compute_metrics(pred_df.loc[valid_all, "y_true"], pred_df.loc[valid_all, "y_pred_garch"],)
+
+    overall_lstm = compute_metrics(pred_df["y_true"], pred_df["y_pred_lstm"])
+
+    overall_df = pd.DataFrame([{"ticker": ticker, "rmse_naive": overall_naive["rmse"], "mae_naive": overall_naive["mae"], "rmse_garch": overall_garch["rmse"], "mae_garch": overall_garch["mae"], "rmse_lstm": overall_lstm["rmse"], "mae_lstm": overall_lstm["mae"],}])
 
     return pred_df, fold_metrics_df, overall_df
 
@@ -141,6 +149,7 @@ def plot_predictions(pred_df: pd.DataFrame, out_dir: str) -> None:
         plt.plot(g["Date"], g["y_true"], label="True")
         plt.plot(g["Date"], g["y_pred_naive"], linestyle="--", label="Naive")
         plt.plot(g["Date"], g["y_pred_garch"], linestyle=":", label="GARCH")
+        plt.plot(g["Date"], g["y_pred_lstm"], linestyle="-.", label="LSTM")
         plt.title(f"Realized Volatility Forecast - {ticker}")
         plt.xlabel("Date")
         plt.ylabel("Volatility")
@@ -185,4 +194,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
 
