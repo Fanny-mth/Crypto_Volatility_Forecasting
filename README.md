@@ -1,23 +1,20 @@
 # Crypto_Volatility_Forecasting
 
-Forecasting cryptocurrency volatility using GARCH and LSTM models.
+Forecasting short-term cryptocurrency volatility using naive benchmarks, GARCH models, and LSTM neural networks.
 
 ## Setup and Usage Instructions
 
-This repository contains the final project for the Advanced Programming course.
-The project focuses on forecasting short-term cryptocurrency volatility using
-different modeling approaches.
-
-## Requirements
-
+### Requirements
 - Python 3.10 or higher
 - pip
 
-## Installation
+### Installation
 
-Install the required dependencies:
+Clone the repository and install the required dependencies:
 
-```bash 
+```bash
+git clone https://github.com/Fanny-mth/Crypto_Volatility_Forecasting.git
+cd Crypto_Volatility_Forecasting
 pip install -r requirements.txt
 ```
 
