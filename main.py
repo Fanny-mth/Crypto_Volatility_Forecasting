@@ -12,11 +12,11 @@ from src.models import garch_forecast_sigma_path
 from src.models import LSTMConfig, make_sequences, train_lstm_predict
 
 
-def ensure_results_dir() -> None:
+def create_output_folders():
     os.makedirs("results/plots", exist_ok=True)
 
 
-def make_walk_forward_splits(n: int, initial_train_size: int, test_size: int, step_size: int):
+def get_walk_forward_splits(n, initial_train_size, test_size, step_size):
     splits = []
     train_end = initial_train_size
 
@@ -31,13 +31,13 @@ def make_walk_forward_splits(n: int, initial_train_size: int, test_size: int, st
     return splits
 
 
-def naive_predict_on_block(df: pd.DataFrame, test_start: int, test_end: int):
+def naive_baseline_predictions(df, test_start, test_end):
     y_true_block = df["target"].iloc[test_start:test_end]
     y_pred_block = df["target"].shift(1).iloc[test_start:test_end]
     return y_true_block, y_pred_block
 
 
-def run_for_ticker(ticker: str, start: str, end: str, vol_window: int, horizon: int):
+def run_experiment_for_ticker(ticker, start, end, vol_window, horizon):
     prices = download_crypto_prices(ticker, start=start, end=end)
     df = prepare_dataset(prices, vol_window=vol_window, horizon=horizon)
 
@@ -46,8 +46,8 @@ def run_for_ticker(ticker: str, start: str, end: str, vol_window: int, horizon: 
 
     df = df.dropna().reset_index(drop=True)
 
-    feature_cols = ["rv_7", "log_return"]
-    for c in feature_cols:
+    features = ["rv_7", "log_return"]
+    for c in features:
         if c not in df.columns:
             raise ValueError(f"Missing feature column: {c}. Available columns: {df.columns.tolist()}")
 
@@ -57,16 +57,16 @@ def run_for_ticker(ticker: str, start: str, end: str, vol_window: int, horizon: 
     test_size = 30
     step_size = 30
 
-    splits = make_walk_forward_splits(n, initial_train_size, test_size, step_size)
+    splits = get_walk_forward_splits(n, initial_train_size, test_size, step_size)
     if len(splits) == 0:
         raise ValueError("Not enough data for walk-forward splits. Use more data or reduce test_size/step_size.")
 
-    all_pred_rows = []
-    fold_metrics = []
+    all_predictions = []
+    metrics_per_fold = []
 
     for fold_id, (train_end, test_start, test_end) in enumerate(splits, start=1):
         # NAIVE
-        y_true_block, y_pred_block = naive_predict_on_block(df, test_start, test_end)
+        y_true_block, y_pred_block = naive_baseline_predictions(df, test_start, test_end)
         m_naive = compute_metrics(y_true_block, y_pred_block)
 
         # GARCH
@@ -78,16 +78,16 @@ def run_for_ticker(ticker: str, start: str, end: str, vol_window: int, horizon: 
         valid = y_pred_garch_block.notna()
         m_garch = compute_metrics(y_true_block[valid], y_pred_garch_block[valid])
 
-        # LSTM 
+        # LSTM
         cfg = LSTMConfig(lookback=30)
 
         train_df = df.iloc[:test_start].copy()
         full_df = df.iloc[:test_end].copy()
 
-        X_train_raw = train_df[feature_cols].values
+        X_train_raw = train_df[features].values
         y_train_raw = train_df["target"].values
 
-        X_full_raw = full_df[feature_cols].values
+        X_full_raw = full_df[features].values
         y_full_raw = full_df["target"].values
 
         scaler = StandardScaler()
@@ -98,7 +98,7 @@ def run_for_ticker(ticker: str, start: str, end: str, vol_window: int, horizon: 
         X_full_seq, _ = make_sequences(X_full, y_full_raw, cfg.lookback)
 
         seq_offset = cfg.lookback
-        X_test_seq = X_full_seq[test_start - seq_offset: test_end - seq_offset]
+        X_test_seq = X_full_seq[test_start - seq_offset : test_end - seq_offset]
 
         if len(X_train_seq) == 0 or len(X_test_seq) == 0:
             raise ValueError("LSTM sequences empty. Try smaller lookback or more data.")
@@ -108,10 +108,10 @@ def run_for_ticker(ticker: str, start: str, end: str, vol_window: int, horizon: 
 
         m_lstm = compute_metrics(y_true_block, y_pred_lstm_block)
 
-        # Save fold metrics 
-        fold_metrics.append({"ticker": ticker, "fold": fold_id, "train_end_index": train_end, "test_start_index": test_start, "test_end_index": test_end, "rmse_naive": m_naive["rmse"], "mae_naive": m_naive["mae"], "rmse_garch": m_garch["rmse"], "mae_garch": m_garch["mae"], "rmse_lstm": m_lstm["rmse"], "mae_lstm": m_lstm["mae"],})
+        # Save fold metrics
+        metrics_per_fold.append({"ticker": ticker, "fold": fold_id, "train_end_index": train_end, "test_start_index": test_start, "test_end_index": test_end, "rmse_naive": m_naive["rmse"], "mae_naive": m_naive["mae"], "rmse_garch": m_garch["rmse"], "mae_garch": m_garch["mae"], "rmse_lstm": m_lstm["rmse"], "mae_lstm": m_lstm["mae"],})
 
-        # Save predictions 
+        # Save predictions
         block = df.iloc[test_start:test_end][["Date", "target"]].copy()
         block = block.rename(columns={"target": "y_true"})
         block["y_pred_naive"] = y_pred_block.values
@@ -119,25 +119,25 @@ def run_for_ticker(ticker: str, start: str, end: str, vol_window: int, horizon: 
         block["y_pred_lstm"] = y_pred_lstm_block.values
         block["ticker"] = ticker
         block["fold"] = fold_id
-        all_pred_rows.append(block)
+        all_predictions.append(block)
 
-    pred_df = pd.concat(all_pred_rows, ignore_index=True)
-    fold_metrics_df = pd.DataFrame(fold_metrics)
+    pred_df = pd.concat(all_predictions, ignore_index=True)
+    fold_metrics_df = pd.DataFrame(metrics_per_fold)
 
-    # Overall metrics 
-    overall_naive = compute_metrics(pred_df["y_true"], pred_df["y_pred_naive"])
+    # Overall metrics
+    naive_overall_metrics = compute_metrics(pred_df["y_true"], pred_df["y_pred_naive"])
 
     valid_all = pred_df["y_pred_garch"].notna()
-    overall_garch = compute_metrics(pred_df.loc[valid_all, "y_true"], pred_df.loc[valid_all, "y_pred_garch"],)
+    garch_overall_metrics = compute_metrics(pred_df.loc[valid_all, "y_true"], pred_df.loc[valid_all, "y_pred_garch"],)
 
-    overall_lstm = compute_metrics(pred_df["y_true"], pred_df["y_pred_lstm"])
+    lstm_overall_metrics = compute_metrics(pred_df["y_true"], pred_df["y_pred_lstm"])
 
-    overall_df = pd.DataFrame([{"ticker": ticker, "rmse_naive": overall_naive["rmse"], "mae_naive": overall_naive["mae"], "rmse_garch": overall_garch["rmse"], "mae_garch": overall_garch["mae"], "rmse_lstm": overall_lstm["rmse"], "mae_lstm": overall_lstm["mae"],}])
+    overall_df = pd.DataFrame([{"ticker": ticker, "rmse_naive": naive_overall_metrics["rmse"], "mae_naive": naive_overall_metrics["mae"], "rmse_garch": garch_overall_metrics["rmse"], "mae_garch": garch_overall_metrics["mae"], "rmse_lstm": lstm_overall_metrics["rmse"], "mae_lstm": lstm_overall_metrics["mae"],}])
 
     return pred_df, fold_metrics_df, overall_df
 
 
-def plot_predictions(pred_df: pd.DataFrame, out_dir: str) -> None:
+def plot_predictions(pred_df, out_dir):
     os.makedirs(out_dir, exist_ok=True)
     pred_df = pred_df.copy()
     pred_df["Date"] = pd.to_datetime(pred_df["Date"])
@@ -159,8 +159,8 @@ def plot_predictions(pred_df: pd.DataFrame, out_dir: str) -> None:
         plt.close()
 
 
-def main() -> None:
-    ensure_results_dir()
+def main():
+    create_output_folders()
 
     tickers = ["BTC-USD", "ETH-USD"]
     start = "2022-01-01"
@@ -173,7 +173,7 @@ def main() -> None:
     all_overall_metrics = []
 
     for t in tickers:
-        preds, fold_m, overall_m = run_for_ticker(t, start, end, vol_window, horizon)
+        preds, fold_m, overall_m = run_experiment_for_ticker(t, start, end, vol_window, horizon)
         all_preds.append(preds)
         all_fold_metrics.append(fold_m)
         all_overall_metrics.append(overall_m)
@@ -194,5 +194,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-
