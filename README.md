@@ -32,7 +32,7 @@ cd Crypto_Volatility_Forecasting
 pip install -r requirements.txt
 ```
 
-## Running the Project
+### Running the Project
 
 From the root directory of the repository, run:
 
