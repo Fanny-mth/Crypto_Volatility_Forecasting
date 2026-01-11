@@ -8,7 +8,7 @@ Cryptocurrencies are characterized by high and unpredictable price fluctuations.
 
 ## Data & Methodology
 - **Data Source**: Historical price data (daily or hourly) for BTC/USD and ETH/USD collected via `yfinance` or Binance API.
-- **Timeframe**: Data period from 2022 to 2024 to capture various market regimes (bull and bear markets).
+- **Timeframe**: Data period from 2022 to 2025 to capture various market regimes (bull and bear markets).
 - **Target**: Realized short-term volatility, computed as the standard deviation of log returns over a rolling window.
 - **Models**:
     - **Baseline**: GARCH (Generalized Autoregressive Conditional Heteroskedasticity) to model time-varying clusters of volatility.
